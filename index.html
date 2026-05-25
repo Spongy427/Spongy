@@ -1,0 +1,303 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Lucky Draw</title>
+<style>
+  :root {
+    --bg: #0f1226;
+    --card: #1a1f3a;
+    --accent: #ffd24a;
+    --accent-2: #ff5d8f;
+    --text: #f4f5fb;
+    --muted: #9aa0c4;
+    --border: #2c335c;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    min-height: 100vh;
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    background: radial-gradient(1200px 600px at 50% -10%, #232a52, var(--bg));
+    color: var(--text);
+    display: flex;
+    justify-content: center;
+    padding: 32px 16px;
+  }
+  .app {
+    width: 100%;
+    max-width: 880px;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 24px;
+  }
+  header {
+    grid-column: 1 / -1;
+    text-align: center;
+  }
+  h1 {
+    margin: 0 0 4px;
+    font-size: 2rem;
+    letter-spacing: 0.5px;
+  }
+  h1 .spark { color: var(--accent); }
+  header p { margin: 0; color: var(--muted); }
+  .card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    padding: 20px;
+  }
+  label {
+    display: block;
+    font-size: 0.85rem;
+    color: var(--muted);
+    margin-bottom: 8px;
+    text-transform: uppercase;
+    letter-spacing: 0.6px;
+  }
+  textarea {
+    width: 100%;
+    min-height: 240px;
+    resize: vertical;
+    background: #11152e;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    color: var(--text);
+    padding: 12px;
+    font-size: 1rem;
+    font-family: inherit;
+    line-height: 1.6;
+  }
+  textarea:focus { outline: 2px solid var(--accent); border-color: transparent; }
+  .count { margin-top: 8px; font-size: 0.85rem; color: var(--muted); }
+  .controls { display: flex; gap: 10px; margin-top: 14px; flex-wrap: wrap; }
+  button {
+    border: none;
+    border-radius: 10px;
+    padding: 12px 18px;
+    font-size: 1rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: transform 0.06s ease, filter 0.15s ease;
+  }
+  button:active { transform: translateY(1px); }
+  button:disabled { opacity: 0.45; cursor: not-allowed; }
+  .btn-draw {
+    flex: 1;
+    background: linear-gradient(135deg, var(--accent), #ff9d3c);
+    color: #1a1300;
+  }
+  .btn-draw:hover:not(:disabled) { filter: brightness(1.05); }
+  .btn-secondary {
+    background: transparent;
+    color: var(--muted);
+    border: 1px solid var(--border);
+  }
+  .btn-secondary:hover { color: var(--text); border-color: var(--muted); }
+  .stage {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    min-height: 280px;
+  }
+  .stage .hint { color: var(--muted); }
+  .winner-label {
+    font-size: 0.85rem;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    margin-bottom: 12px;
+  }
+  .winner-name {
+    font-size: 2.4rem;
+    font-weight: 800;
+    background: linear-gradient(135deg, var(--accent), var(--accent-2));
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+    word-break: break-word;
+    line-height: 1.2;
+  }
+  .winner-name.rolling { animation: none; }
+  .pop { animation: pop 0.4s ease; }
+  @keyframes pop {
+    0% { transform: scale(0.6); opacity: 0; }
+    70% { transform: scale(1.08); }
+    100% { transform: scale(1); opacity: 1; }
+  }
+  .history { margin-top: 18px; width: 100%; }
+  .history h3 { margin: 0 0 8px; font-size: 0.8rem; color: var(--muted); text-transform: uppercase; letter-spacing: 1px; }
+  .history ul { list-style: none; margin: 0; padding: 0; max-height: 120px; overflow-y: auto; }
+  .history li {
+    display: flex;
+    justify-content: space-between;
+    padding: 6px 10px;
+    border-radius: 8px;
+    font-size: 0.9rem;
+  }
+  .history li:nth-child(odd) { background: #161b36; }
+  .history li .who { font-weight: 600; }
+  .history li .num { color: var(--muted); }
+  .toggle { display: flex; align-items: center; gap: 8px; margin-top: 12px; font-size: 0.85rem; color: var(--muted); }
+  .toggle input { width: 16px; height: 16px; }
+  @media (max-width: 640px) {
+    .app { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+  <div class="app">
+    <header>
+      <h1><span class="spark">&#10024;</span> Lucky Draw <span class="spark">&#10024;</span></h1>
+      <p>Enter names below, then hit Draw to pick a winner.</p>
+    </header>
+
+    <section class="card">
+      <label for="names">Participants (one per line)</label>
+      <textarea id="names" placeholder="Alice&#10;Bob&#10;Charlie&#10;Dana"></textarea>
+      <div class="count" id="count">0 names</div>
+      <label class="toggle">
+        <input type="checkbox" id="removeWinner" />
+        Remove winner from the pool after each draw
+      </label>
+      <div class="controls">
+        <button class="btn-draw" id="drawBtn">&#127881; Draw Winner</button>
+        <button class="btn-secondary" id="clearBtn">Clear</button>
+      </div>
+    </section>
+
+    <section class="card stage">
+      <div id="result">
+        <div class="hint">The winner will appear here.</div>
+      </div>
+      <div class="history" id="historyWrap" hidden>
+        <h3>Past winners</h3>
+        <ul id="history"></ul>
+      </div>
+    </section>
+  </div>
+
+<script>
+  const namesEl = document.getElementById("names");
+  const countEl = document.getElementById("count");
+  const drawBtn = document.getElementById("drawBtn");
+  const clearBtn = document.getElementById("clearBtn");
+  const resultEl = document.getElementById("result");
+  const removeWinnerEl = document.getElementById("removeWinner");
+  const historyWrap = document.getElementById("historyWrap");
+  const historyEl = document.getElementById("history");
+
+  let history = [];
+  let rolling = false;
+
+  function parseNames() {
+    return namesEl.value
+      .split("\n")
+      .map(n => n.trim())
+      .filter(n => n.length > 0);
+  }
+
+  function updateCount() {
+    const n = parseNames().length;
+    countEl.textContent = n + (n === 1 ? " name" : " names");
+    drawBtn.disabled = n === 0 || rolling;
+  }
+
+  function secureRandomInt(max) {
+    // Unbiased random integer in [0, max) using crypto when available.
+    if (max <= 0) return 0;
+    if (window.crypto && window.crypto.getRandomValues) {
+      const limit = Math.floor(0xffffffff / max) * max;
+      const buf = new Uint32Array(1);
+      let x;
+      do {
+        window.crypto.getRandomValues(buf);
+        x = buf[0];
+      } while (x >= limit);
+      return x % max;
+    }
+    return Math.floor(Math.random() * max);
+  }
+
+  function showWinner(name) {
+    resultEl.innerHTML =
+      '<div class="winner-label">&#127942; Winner</div>' +
+      '<div class="winner-name pop"></div>';
+    resultEl.querySelector(".winner-name").textContent = name;
+  }
+
+  function addHistory(name) {
+    history.unshift(name);
+    historyWrap.hidden = false;
+    historyEl.innerHTML = "";
+    history.forEach((h, i) => {
+      const li = document.createElement("li");
+      const who = document.createElement("span");
+      who.className = "who";
+      who.textContent = h;
+      const num = document.createElement("span");
+      num.className = "num";
+      num.textContent = "#" + (history.length - i);
+      li.appendChild(who);
+      li.appendChild(num);
+      historyEl.appendChild(li);
+    });
+  }
+
+  function draw() {
+    const names = parseNames();
+    if (names.length === 0 || rolling) return;
+
+    rolling = true;
+    drawBtn.disabled = true;
+
+    const winnerIdx = secureRandomInt(names.length);
+    const winner = names[winnerIdx];
+
+    // Suspense: shuffle through names quickly before landing.
+    const labelEl = '<div class="winner-label">Drawing&hellip;</div>';
+    resultEl.innerHTML = labelEl + '<div class="winner-name rolling"></div>';
+    const rollEl = resultEl.querySelector(".winner-name");
+
+    let ticks = 0;
+    const totalTicks = Math.min(20, 8 + names.length);
+    const interval = setInterval(() => {
+      rollEl.textContent = names[secureRandomInt(names.length)];
+      ticks++;
+      if (ticks >= totalTicks) {
+        clearInterval(interval);
+        showWinner(winner);
+        addHistory(winner);
+        rolling = false;
+
+        if (removeWinnerEl.checked) {
+          const remaining = names.slice(0, winnerIdx).concat(names.slice(winnerIdx + 1));
+          namesEl.value = remaining.join("\n");
+        }
+        updateCount();
+      }
+    }, 70);
+  }
+
+  function clearAll() {
+    namesEl.value = "";
+    history = [];
+    historyEl.innerHTML = "";
+    historyWrap.hidden = true;
+    resultEl.innerHTML = '<div class="hint">The winner will appear here.</div>';
+    updateCount();
+    namesEl.focus();
+  }
+
+  namesEl.addEventListener("input", updateCount);
+  drawBtn.addEventListener("click", draw);
+  clearBtn.addEventListener("click", clearAll);
+
+  updateCount();
+</script>
+</body>
+</html>
