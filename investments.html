@@ -484,6 +484,32 @@
   function pad(n) { return String(n).padStart(2, "0"); }
   function ymd(d) { return `${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}`; }
 
+  // CORS proxies — Stooq doesn't always send permissive CORS headers,
+  // so we route through a public proxy (with fallbacks) when fetching from it.
+  const CORS_PROXIES = [
+    (u) => "https://corsproxy.io/?url=" + encodeURIComponent(u),
+    (u) => "https://api.allorigins.win/raw?url=" + encodeURIComponent(u),
+    (u) => "https://api.codetabs.com/v1/proxy?quest=" + encodeURIComponent(u),
+  ];
+
+  async function fetchWithProxy(targetUrl) {
+    let lastErr = null;
+    // Try direct first (cheapest if it works), then each proxy.
+    const attempts = [targetUrl, ...CORS_PROXIES.map(p => p(targetUrl))];
+    for (const url of attempts) {
+      try {
+        const res = await fetch(url);
+        if (!res.ok) { lastErr = new Error("HTTP " + res.status); continue; }
+        const text = await res.text();
+        if (text && text.length > 0) return text;
+        lastErr = new Error("Empty response");
+      } catch (e) {
+        lastErr = e;
+      }
+    }
+    throw lastErr || new Error("All fetch attempts failed");
+  }
+
   async function fetchFxUsdHkd() {
     try {
       const res = await fetch("https://open.er-api.com/v6/latest/USD");
@@ -501,9 +527,7 @@
   async function fetchStooq(ticker) {
     const sym = ticker.toLowerCase() + ".us";
     const url = `https://stooq.com/q/l/?s=${sym}&f=sd2t2ohlcv&h&e=csv`;
-    const res = await fetch(url);
-    if (!res.ok) throw new Error("Stooq HTTP " + res.status);
-    const text = (await res.text()).trim();
+    const text = (await fetchWithProxy(url)).trim();
     const lines = text.split(/\r?\n/);
     if (lines.length < 2) throw new Error("Empty CSV");
     const cols = lines[1].split(",");
@@ -526,14 +550,11 @@
     const sym = ticker.toLowerCase() + ".us";
     const today = new Date();
     const start = new Date(); start.setFullYear(today.getFullYear() - 5);
-    start.setDate(start.getDate() - 14); // small buffer
+    start.setDate(start.getDate() - 14);
     const url = `https://stooq.com/q/d/l/?s=${sym}&i=d&d1=${ymd(start)}&d2=${ymd(today)}`;
-    const res = await fetch(url);
-    if (!res.ok) throw new Error("History HTTP " + res.status);
-    const text = (await res.text()).trim();
+    const text = (await fetchWithProxy(url)).trim();
     const lines = text.split(/\r?\n/);
     if (lines.length < 2) throw new Error("No history rows");
-    // header: Date,Open,High,Low,Close,Volume
     const out = [];
     for (let i = 1; i < lines.length; i++) {
       const parts = lines[i].split(",");
