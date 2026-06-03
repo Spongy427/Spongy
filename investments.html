@@ -1,0 +1,419 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>AI &amp; Semiconductor Investment Monitor</title>
+<style>
+  :root {
+    --bg: #0b1020;
+    --card: #161c34;
+    --card-2: #11162b;
+    --accent: #4ade80;
+    --accent-2: #60a5fa;
+    --down: #f87171;
+    --up: #4ade80;
+    --text: #e7eaf6;
+    --muted: #8b93b8;
+    --border: #2a3158;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    min-height: 100vh;
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    background: radial-gradient(1400px 700px at 50% -15%, #1c2452, var(--bg));
+    color: var(--text);
+    padding: 28px 16px 60px;
+  }
+  .app { max-width: 1200px; margin: 0 auto; }
+  header { display: flex; flex-wrap: wrap; align-items: end; justify-content: space-between; gap: 16px; margin-bottom: 20px; }
+  h1 { margin: 0 0 4px; font-size: 1.7rem; letter-spacing: 0.3px; }
+  header p { margin: 0; color: var(--muted); font-size: 0.95rem; }
+  .meta {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 10px 14px;
+    font-size: 0.85rem;
+    color: var(--muted);
+    display: flex;
+    gap: 16px;
+    flex-wrap: wrap;
+    align-items: center;
+  }
+  .meta strong { color: var(--text); font-weight: 600; }
+  .controls { display: flex; gap: 10px; flex-wrap: wrap; margin: 0 0 16px; }
+  button {
+    border: none;
+    border-radius: 10px;
+    padding: 10px 16px;
+    font-size: 0.95rem;
+    font-weight: 600;
+    cursor: pointer;
+    background: linear-gradient(135deg, var(--accent-2), #818cf8);
+    color: #0b1020;
+    transition: filter 0.15s ease, transform 0.06s ease;
+  }
+  button:hover:not(:disabled) { filter: brightness(1.08); }
+  button:active { transform: translateY(1px); }
+  button:disabled { opacity: 0.5; cursor: not-allowed; }
+  .btn-ghost {
+    background: transparent;
+    color: var(--muted);
+    border: 1px solid var(--border);
+  }
+  .btn-ghost:hover { color: var(--text); border-color: var(--muted); }
+  .search {
+    flex: 1;
+    min-width: 200px;
+    padding: 10px 12px;
+    background: var(--card-2);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    font-size: 0.95rem;
+  }
+  .search:focus { outline: 2px solid var(--accent-2); border-color: transparent; }
+  .table-wrap {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    overflow: hidden;
+  }
+  table { width: 100%; border-collapse: collapse; font-size: 0.94rem; }
+  thead th {
+    text-align: left;
+    padding: 12px 14px;
+    background: #1b2244;
+    color: var(--muted);
+    font-weight: 600;
+    font-size: 0.78rem;
+    text-transform: uppercase;
+    letter-spacing: 0.7px;
+    border-bottom: 1px solid var(--border);
+    position: sticky;
+    top: 0;
+    cursor: pointer;
+    user-select: none;
+    white-space: nowrap;
+  }
+  thead th .arrow { color: var(--accent-2); margin-left: 4px; font-size: 0.7rem; }
+  tbody td {
+    padding: 12px 14px;
+    border-bottom: 1px solid #1f2647;
+    white-space: nowrap;
+  }
+  tbody tr:hover { background: #1a2148; }
+  tbody tr:last-child td { border-bottom: none; }
+  .ticker { font-weight: 700; color: var(--accent); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+  .name { color: var(--text); }
+  .sector {
+    display: inline-block;
+    font-size: 0.72rem;
+    padding: 2px 8px;
+    border-radius: 999px;
+    background: #232b58;
+    color: var(--muted);
+    margin-left: 8px;
+  }
+  .num { font-variant-numeric: tabular-nums; }
+  .up { color: var(--up); }
+  .down { color: var(--down); }
+  .muted { color: var(--muted); }
+  .loading, .error, .empty {
+    padding: 28px;
+    text-align: center;
+    color: var(--muted);
+  }
+  .error { color: var(--down); }
+  .spinner {
+    display: inline-block;
+    width: 14px; height: 14px;
+    border: 2px solid var(--muted);
+    border-top-color: var(--accent-2);
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+    vertical-align: -2px;
+    margin-right: 8px;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  footer {
+    margin-top: 16px;
+    font-size: 0.78rem;
+    color: var(--muted);
+    text-align: center;
+    line-height: 1.6;
+  }
+  footer a { color: var(--accent-2); text-decoration: none; }
+  footer a:hover { text-decoration: underline; }
+  @media (max-width: 720px) {
+    thead th, tbody td { padding: 10px 8px; font-size: 0.85rem; }
+    .ticker { font-size: 0.9rem; }
+    .hide-sm { display: none; }
+  }
+</style>
+</head>
+<body>
+  <div class="app">
+    <header>
+      <div>
+        <h1>AI &amp; Semiconductor Investment Monitor</h1>
+        <p>Daily US stock prices for major AI and chip companies — shown in USD and HKD.</p>
+      </div>
+      <div class="meta" id="meta">
+        <span><span class="spinner"></span>Loading market data&hellip;</span>
+      </div>
+    </header>
+
+    <div class="controls">
+      <input id="search" class="search" type="search" placeholder="Filter by ticker or name (e.g. NVDA, broadcom)" />
+      <button id="refreshBtn">Refresh</button>
+      <button id="sortByChange" class="btn-ghost">Sort by % change</button>
+    </div>
+
+    <div class="table-wrap">
+      <table id="tbl">
+        <thead>
+          <tr>
+            <th data-key="ticker">Ticker</th>
+            <th data-key="name">Company</th>
+            <th data-key="date" class="hide-sm">Date</th>
+            <th data-key="close" class="num">Close (USD)</th>
+            <th data-key="closeHkd" class="num">Close (HKD)</th>
+            <th data-key="change" class="num">Change</th>
+            <th data-key="pct" class="num">% Change</th>
+            <th data-key="open" class="num hide-sm">Open</th>
+            <th data-key="high" class="num hide-sm">High</th>
+            <th data-key="low" class="num hide-sm">Low</th>
+            <th data-key="volume" class="num hide-sm">Volume</th>
+          </tr>
+        </thead>
+        <tbody id="rows">
+          <tr><td colspan="11" class="loading"><span class="spinner"></span>Fetching latest prices&hellip;</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <footer>
+      Price data: <a href="https://stooq.com" target="_blank" rel="noopener">stooq.com</a> (delayed, end-of-day).
+      FX rate: <a href="https://open.er-api.com" target="_blank" rel="noopener">open.er-api.com</a>.
+      For informational use only — not investment advice.
+    </footer>
+  </div>
+
+<script>
+  const TICKERS = [
+    // Semiconductors
+    { ticker: "NVDA",  name: "NVIDIA",                       sector: "Semi" },
+    { ticker: "AMD",   name: "Advanced Micro Devices",       sector: "Semi" },
+    { ticker: "AVGO",  name: "Broadcom",                     sector: "Semi" },
+    { ticker: "TSM",   name: "Taiwan Semiconductor (TSMC)",  sector: "Semi" },
+    { ticker: "INTC",  name: "Intel",                        sector: "Semi" },
+    { ticker: "MU",    name: "Micron Technology",            sector: "Semi" },
+    { ticker: "QCOM",  name: "Qualcomm",                     sector: "Semi" },
+    { ticker: "ASML",  name: "ASML Holding",                 sector: "Semi" },
+    { ticker: "MRVL",  name: "Marvell Technology",           sector: "Semi" },
+    { ticker: "ARM",   name: "Arm Holdings",                 sector: "Semi" },
+    { ticker: "SMCI",  name: "Super Micro Computer",         sector: "Semi" },
+    { ticker: "AMAT",  name: "Applied Materials",            sector: "Semi" },
+    { ticker: "LRCX",  name: "Lam Research",                 sector: "Semi" },
+    { ticker: "KLAC",  name: "KLA Corporation",              sector: "Semi" },
+    // AI / Hyperscalers
+    { ticker: "MSFT",  name: "Microsoft",                    sector: "AI"   },
+    { ticker: "GOOGL", name: "Alphabet (Google)",            sector: "AI"   },
+    { ticker: "META",  name: "Meta Platforms",               sector: "AI"   },
+    { ticker: "AMZN",  name: "Amazon",                       sector: "AI"   },
+    { ticker: "ORCL",  name: "Oracle",                       sector: "AI"   },
+    { ticker: "PLTR",  name: "Palantir",                     sector: "AI"   },
+    { ticker: "CRM",   name: "Salesforce",                   sector: "AI"   },
+    { ticker: "IBM",   name: "IBM",                          sector: "AI"   },
+  ];
+
+  const rowsEl = document.getElementById("rows");
+  const metaEl = document.getElementById("meta");
+  const searchEl = document.getElementById("search");
+  const refreshBtn = document.getElementById("refreshBtn");
+  const sortByChangeBtn = document.getElementById("sortByChange");
+  const headers = document.querySelectorAll("thead th");
+
+  let allRows = [];
+  let usdToHkd = null;
+  let sortKey = "ticker";
+  let sortDir = 1; // 1 = asc, -1 = desc
+
+  function fmtNum(n, digits) {
+    if (n === null || n === undefined || Number.isNaN(n)) return "—";
+    return Number(n).toLocaleString("en-US", { minimumFractionDigits: digits, maximumFractionDigits: digits });
+  }
+  function fmtInt(n) {
+    if (n === null || n === undefined || Number.isNaN(n)) return "—";
+    return Number(n).toLocaleString("en-US");
+  }
+
+  async function fetchFxUsdHkd() {
+    // open.er-api.com is free, CORS-enabled, no key required.
+    try {
+      const res = await fetch("https://open.er-api.com/v6/latest/USD");
+      if (!res.ok) throw new Error("FX HTTP " + res.status);
+      const data = await res.json();
+      const rate = data && data.rates && data.rates.HKD;
+      if (!rate) throw new Error("HKD rate missing");
+      return { rate, updated: data.time_last_update_utc || null };
+    } catch (e) {
+      console.warn("FX fetch failed, using fallback 7.80:", e);
+      return { rate: 7.80, updated: null, fallback: true };
+    }
+  }
+
+  async function fetchStooq(ticker) {
+    // Stooq supports CORS and returns CSV.
+    // Format: Symbol,Date,Time,Open,High,Low,Close,Volume
+    const sym = ticker.toLowerCase() + ".us";
+    const url = `https://stooq.com/q/l/?s=${sym}&f=sd2t2ohlcv&h&e=csv`;
+    const res = await fetch(url);
+    if (!res.ok) throw new Error("Stooq HTTP " + res.status);
+    const text = (await res.text()).trim();
+    const lines = text.split(/\r?\n/);
+    if (lines.length < 2) throw new Error("Empty CSV");
+    const cols = lines[1].split(",");
+    if (cols.length < 8) throw new Error("Bad CSV row");
+    const [symbol, date, time, open, high, low, close, volume] = cols;
+    if (close === "N/D" || !close) throw new Error("No data");
+    return {
+      symbol: symbol.toUpperCase(),
+      date,
+      time,
+      open: parseFloat(open),
+      high: parseFloat(high),
+      low: parseFloat(low),
+      close: parseFloat(close),
+      volume: parseInt(volume, 10),
+    };
+  }
+
+  function renderMeta() {
+    const lastUpdated = new Date().toLocaleString("en-US", { hour12: false });
+    const fxNote = usdToHkd
+      ? `1 USD = <strong>${fmtNum(usdToHkd, 4)} HKD</strong>`
+      : "FX unavailable";
+    metaEl.innerHTML =
+      `<span>${fxNote}</span>` +
+      `<span>Tracking <strong>${TICKERS.length}</strong> companies</span>` +
+      `<span>Last refresh: <strong>${lastUpdated}</strong></span>`;
+  }
+
+  function compare(a, b) {
+    const av = a[sortKey];
+    const bv = b[sortKey];
+    if (av === null || av === undefined || Number.isNaN(av)) return 1;
+    if (bv === null || bv === undefined || Number.isNaN(bv)) return -1;
+    if (typeof av === "number" && typeof bv === "number") return (av - bv) * sortDir;
+    return String(av).localeCompare(String(bv)) * sortDir;
+  }
+
+  function render() {
+    const q = searchEl.value.trim().toLowerCase();
+    const filtered = allRows.filter(r =>
+      !q || r.ticker.toLowerCase().includes(q) || r.name.toLowerCase().includes(q)
+    );
+    filtered.sort(compare);
+
+    headers.forEach(h => {
+      const k = h.dataset.key;
+      const existing = h.querySelector(".arrow");
+      if (existing) existing.remove();
+      if (k === sortKey) {
+        const s = document.createElement("span");
+        s.className = "arrow";
+        s.textContent = sortDir === 1 ? "▲" : "▼";
+        h.appendChild(s);
+      }
+    });
+
+    if (filtered.length === 0) {
+      rowsEl.innerHTML = `<tr><td colspan="11" class="empty">No matching tickers.</td></tr>`;
+      return;
+    }
+
+    rowsEl.innerHTML = filtered.map(r => {
+      if (r.error) {
+        return `<tr>
+          <td class="ticker">${r.ticker}</td>
+          <td class="name">${r.name} <span class="sector">${r.sector}</span></td>
+          <td colspan="9" class="muted">— ${r.error} —</td>
+        </tr>`;
+      }
+      const changeClass = r.change >= 0 ? "up" : "down";
+      const sign = r.change >= 0 ? "+" : "";
+      return `<tr>
+        <td class="ticker">${r.ticker}</td>
+        <td class="name">${r.name} <span class="sector">${r.sector}</span></td>
+        <td class="muted hide-sm">${r.date || "—"}</td>
+        <td class="num">$${fmtNum(r.close, 2)}</td>
+        <td class="num">HK$${fmtNum(r.closeHkd, 2)}</td>
+        <td class="num ${changeClass}">${sign}${fmtNum(r.change, 2)}</td>
+        <td class="num ${changeClass}">${sign}${fmtNum(r.pct, 2)}%</td>
+        <td class="num hide-sm">$${fmtNum(r.open, 2)}</td>
+        <td class="num hide-sm">$${fmtNum(r.high, 2)}</td>
+        <td class="num hide-sm">$${fmtNum(r.low, 2)}</td>
+        <td class="num hide-sm">${fmtInt(r.volume)}</td>
+      </tr>`;
+    }).join("");
+  }
+
+  async function loadAll() {
+    refreshBtn.disabled = true;
+    rowsEl.innerHTML = `<tr><td colspan="11" class="loading"><span class="spinner"></span>Fetching latest prices&hellip;</td></tr>`;
+    metaEl.innerHTML = `<span><span class="spinner"></span>Loading market data&hellip;</span>`;
+
+    const fx = await fetchFxUsdHkd();
+    usdToHkd = fx.rate;
+
+    const results = await Promise.all(TICKERS.map(async (t) => {
+      try {
+        const q = await fetchStooq(t.ticker);
+        const change = q.close - q.open;
+        const pct = q.open ? (change / q.open) * 100 : 0;
+        return {
+          ...t,
+          date: q.date,
+          open: q.open,
+          high: q.high,
+          low: q.low,
+          close: q.close,
+          closeHkd: q.close * usdToHkd,
+          volume: q.volume,
+          change,
+          pct,
+        };
+      } catch (e) {
+        return { ...t, error: "Data unavailable" };
+      }
+    }));
+
+    allRows = results;
+    renderMeta();
+    render();
+    refreshBtn.disabled = false;
+  }
+
+  headers.forEach(h => {
+    h.addEventListener("click", () => {
+      const k = h.dataset.key;
+      if (sortKey === k) sortDir = -sortDir;
+      else { sortKey = k; sortDir = (k === "ticker" || k === "name" || k === "date") ? 1 : -1; }
+      render();
+    });
+  });
+
+  searchEl.addEventListener("input", render);
+  refreshBtn.addEventListener("click", loadAll);
+  sortByChangeBtn.addEventListener("click", () => {
+    sortKey = "pct"; sortDir = -1; render();
+  });
+
+  loadAll();
+</script>
+</body>
+</html>
