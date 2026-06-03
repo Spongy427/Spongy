@@ -389,7 +389,7 @@
     <footer>
       Price data: <a href="https://stooq.com" target="_blank" rel="noopener">stooq.com</a> (delayed, end-of-day).
       FX rate: <a href="https://open.er-api.com" target="_blank" rel="noopener">open.er-api.com</a>.
-      News: aggregated via <a href="https://rss2json.com" target="_blank" rel="noopener">rss2json</a> from Yahoo Finance, MarketWatch &amp; CNBC.
+      News: RSS feeds from Yahoo Finance, MarketWatch &amp; CNBC (fetched via public CORS proxy and parsed in-browser).
       For informational use only — not investment advice.
     </footer>
   </div>
@@ -549,47 +549,64 @@
     }
   }
 
-  async function fetchStooq(ticker) {
-    const sym = ticker.toLowerCase() + ".us";
-    const url = `https://stooq.com/q/l/?s=${sym}&f=sd2t2ohlcv&h&e=csv`;
-    const text = (await fetchWithProxy(url)).trim();
-    const lines = text.split(/\r?\n/);
-    if (lines.length < 2) throw new Error("Empty CSV");
-    const cols = lines[1].split(",");
-    if (cols.length < 8) throw new Error("Bad CSV row");
-    const [symbol, date, time, open, high, low, close, volume] = cols;
-    if (close === "N/D" || !close) throw new Error("No data");
-    return {
-      symbol: symbol.toUpperCase(),
-      date, time,
-      open: parseFloat(open),
-      high: parseFloat(high),
-      low: parseFloat(low),
-      close: parseFloat(close),
-      volume: parseInt(volume, 10),
-    };
-  }
-
-  async function fetchHistory(ticker) {
-    if (historyCache.has(ticker)) return historyCache.get(ticker);
-    const sym = ticker.toLowerCase() + ".us";
-    const today = new Date();
-    const start = new Date(); start.setFullYear(today.getFullYear() - 5);
-    start.setDate(start.getDate() - 14);
-    const url = `https://stooq.com/q/d/l/?s=${sym}&i=d&d1=${ymd(start)}&d2=${ymd(today)}`;
-    const text = (await fetchWithProxy(url)).trim();
-    const lines = text.split(/\r?\n/);
-    if (lines.length < 2) throw new Error("No history rows");
+  function parseStooqCsv(text) {
+    const lines = text.trim().split(/\r?\n/);
+    if (lines.length < 2) throw new Error("No CSV rows");
     const out = [];
     for (let i = 1; i < lines.length; i++) {
-      const parts = lines[i].split(",");
-      if (parts.length < 6) continue;
-      const close = parseFloat(parts[4]);
+      const p = lines[i].split(",");
+      if (p.length < 6) continue;
+      const close = parseFloat(p[4]);
       if (Number.isNaN(close)) continue;
-      out.push({ date: parts[0], close });
+      out.push({
+        date: p[0],
+        open: parseFloat(p[1]),
+        high: parseFloat(p[2]),
+        low: parseFloat(p[3]),
+        close,
+        volume: parseInt(p[5], 10),
+      });
     }
-    if (out.length === 0) throw new Error("History empty");
-    historyCache.set(ticker, out);
+    if (out.length === 0) throw new Error("No usable rows");
+    return out;
+  }
+
+  async function fetchDaily(ticker, fromDate, toDate) {
+    const sym = ticker.toLowerCase() + ".us";
+    const url = `https://stooq.com/q/d/l/?s=${sym}&i=d&d1=${ymd(fromDate)}&d2=${ymd(toDate)}`;
+    const text = await fetchWithProxy(url);
+    return parseStooqCsv(text);
+  }
+
+  // For the table row: last ~10 trading days gives us today + yesterday for
+  // day-over-day change, plus today's OHLCV. Robust to N/D values in the live
+  // quote endpoint when the market is closed.
+  async function fetchRecent(ticker) {
+    const end = new Date();
+    const start = new Date(); start.setDate(end.getDate() - 14);
+    const rows = await fetchDaily(ticker, start, end);
+    const latest = rows[rows.length - 1];
+    const prev = rows.length >= 2 ? rows[rows.length - 2] : null;
+    const change = prev ? latest.close - prev.close : 0;
+    const pct = prev && prev.close ? (change / prev.close) * 100 : 0;
+    return { ...latest, prevClose: prev ? prev.close : null, change, pct };
+  }
+
+  // Chart history: fetch only the requested period and cache by (ticker, period).
+  async function fetchHistory(ticker, period) {
+    const key = ticker + ":" + period;
+    if (historyCache.has(key)) return historyCache.get(key);
+    const end = new Date();
+    const start = new Date();
+    if (period === "3M") start.setMonth(start.getMonth() - 3);
+    else if (period === "1Y") start.setFullYear(start.getFullYear() - 1);
+    else if (period === "3Y") start.setFullYear(start.getFullYear() - 3);
+    else if (period === "5Y") start.setFullYear(start.getFullYear() - 5);
+    else start.setMonth(start.getMonth() - 3);
+    start.setDate(start.getDate() - 7); // small buffer for weekends/holidays
+    const rows = await fetchDaily(ticker, start, end);
+    const out = rows.map(r => ({ date: r.date, close: r.close }));
+    historyCache.set(key, out);
     return out;
   }
 
@@ -701,31 +718,29 @@
     periodTabs.querySelectorAll("button").forEach(b => {
       b.classList.toggle("active", b.dataset.period === activePeriod);
     });
+    await loadActivePeriod();
+  }
+
+  async function loadActivePeriod() {
     chartContainer.innerHTML = `<div class="loading"><span class="spinner"></span>Loading chart&hellip;</div>`;
     chartStats.innerHTML = "";
-
     try {
-      const hist = await fetchHistory(row.ticker);
-      drawForActive(hist);
+      const series = await fetchHistory(activeTicker, activePeriod);
+      renderChart(series, usdToHkd || 7.80);
     } catch (e) {
+      console.warn(`[${activeTicker}] history failed:`, e);
       chartContainer.innerHTML = `<div class="error">Failed to load historical data: ${e.message}</div>`;
     }
   }
 
-  function drawForActive(history) {
-    const series = filterByPeriod(history, activePeriod);
-    renderChart(series, usdToHkd || 7.80);
-  }
-
   periodTabs.addEventListener("click", (e) => {
     const btn = e.target.closest("button");
-    if (!btn) return;
+    if (!btn || !activeTicker) return;
     activePeriod = btn.dataset.period;
     periodTabs.querySelectorAll("button").forEach(b => {
       b.classList.toggle("active", b === btn);
     });
-    const hist = historyCache.get(activeTicker);
-    if (hist) drawForActive(hist);
+    loadActivePeriod();
   });
 
   function closeModal() {
@@ -823,9 +838,7 @@
 
     const results = await Promise.all(TICKERS.map(async (t) => {
       try {
-        const q = await fetchStooq(t.ticker);
-        const change = q.close - q.open;
-        const pct = q.open ? (change / q.open) * 100 : 0;
+        const q = await fetchRecent(t.ticker);
         return {
           ...t,
           date: q.date,
@@ -835,7 +848,8 @@
           close: q.close,
           closeHkd: q.close * usdToHkd,
           volume: q.volume,
-          change, pct,
+          change: q.change,
+          pct: q.pct,
         };
       } catch (e) {
         console.warn(`[${t.ticker}] fetch failed:`, e);
@@ -894,20 +908,34 @@
     return Math.floor(diff / 86400) + "d ago";
   }
 
+  function parseRssXml(xmlText, feed) {
+    const doc = new DOMParser().parseFromString(xmlText, "text/xml");
+    if (doc.querySelector("parsererror")) throw new Error("XML parse error");
+    const items = Array.from(doc.querySelectorAll("item, entry")).slice(0, 15);
+    return items.map(it => {
+      const titleEl = it.querySelector("title");
+      const linkEl  = it.querySelector("link");
+      const descEl  = it.querySelector("description, summary, content");
+      const dateEl  = it.querySelector("pubDate, updated, published, date");
+      const link = linkEl
+        ? (linkEl.getAttribute("href") || linkEl.textContent || "").trim()
+        : "";
+      return {
+        source: feed.id,
+        sourceLabel: feed.label,
+        title: stripHtml(titleEl ? titleEl.textContent : ""),
+        link,
+        desc: stripHtml(descEl ? descEl.textContent : "").slice(0, 240),
+        date: dateEl ? new Date(dateEl.textContent).toISOString() : null,
+      };
+    }).filter(n => n.title && n.link);
+  }
+
   async function fetchFeed(feed) {
-    const api = "https://api.rss2json.com/v1/api.json?count=15&rss_url=" + encodeURIComponent(feed.url);
-    const res = await fetch(api);
-    if (!res.ok) throw new Error(feed.label + " HTTP " + res.status);
-    const data = await res.json();
-    if (data.status !== "ok" || !Array.isArray(data.items)) throw new Error(feed.label + " bad payload");
-    return data.items.map(it => ({
-      source: feed.id,
-      sourceLabel: feed.label,
-      title: stripHtml(it.title),
-      link: it.link,
-      desc: stripHtml(it.description).slice(0, 240),
-      date: it.pubDate ? new Date(it.pubDate).toISOString() : null,
-    }));
+    // Fetch the RSS feed itself through the same CORS-proxy chain, then parse
+    // the XML in-browser. This sidesteps rss2json's free-tier flakiness.
+    const xml = await fetchWithProxy(feed.url);
+    return parseRssXml(xml, feed);
   }
 
   function renderNews() {
