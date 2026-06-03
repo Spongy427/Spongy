@@ -549,47 +549,60 @@
     }
   }
 
-  function parseStooqCsv(text) {
-    const lines = text.trim().split(/\r?\n/);
-    if (lines.length < 2) throw new Error("No CSV rows");
-    const out = [];
-    for (let i = 1; i < lines.length; i++) {
-      const p = lines[i].split(",");
-      if (p.length < 6) continue;
-      const close = parseFloat(p[4]);
-      if (Number.isNaN(close)) continue;
-      out.push({
-        date: p[0],
-        open: parseFloat(p[1]),
-        high: parseFloat(p[2]),
-        low: parseFloat(p[3]),
-        close,
-        volume: parseInt(p[5], 10),
-      });
+  function safeNum(s) {
+    if (s == null) return null;
+    const t = String(s).trim();
+    if (!t || t === "N/D" || t.toUpperCase() === "NULL") return null;
+    const n = parseFloat(t);
+    return Number.isNaN(n) ? null : n;
+  }
+
+  // Live quote endpoint — small (one row), works reliably through allorigins.
+  // Some fields can be "N/D" when the market is closed; safeNum handles that.
+  async function fetchQuote(ticker) {
+    const sym = ticker.toLowerCase() + ".us";
+    const url = `https://stooq.com/q/l/?s=${sym}&f=sd2t2ohlcv&h&e=csv`;
+    const text = (await fetchWithProxy(url)).trim();
+    const lines = text.split(/\r?\n/);
+    if (lines.length < 2) throw new Error("Empty CSV");
+    const cols = lines[1].split(",");
+    if (cols.length < 8) throw new Error("Bad CSV row");
+    const close = safeNum(cols[6]);
+    if (close === null) throw new Error("No close price");
+    const open = safeNum(cols[3]);
+    let change = null, pct = null;
+    if (open !== null && open !== 0) {
+      change = close - open;
+      pct = (change / open) * 100;
     }
-    if (out.length === 0) throw new Error("No usable rows");
-    return out;
+    return {
+      date: cols[1],
+      open,
+      high: safeNum(cols[4]),
+      low: safeNum(cols[5]),
+      close,
+      volume: safeNum(cols[7]),
+      change,
+      pct,
+    };
   }
 
   async function fetchDaily(ticker, fromDate, toDate) {
     const sym = ticker.toLowerCase() + ".us";
     const url = `https://stooq.com/q/d/l/?s=${sym}&i=d&d1=${ymd(fromDate)}&d2=${ymd(toDate)}`;
     const text = await fetchWithProxy(url);
-    return parseStooqCsv(text);
-  }
-
-  // For the table row: last ~10 trading days gives us today + yesterday for
-  // day-over-day change, plus today's OHLCV. Robust to N/D values in the live
-  // quote endpoint when the market is closed.
-  async function fetchRecent(ticker) {
-    const end = new Date();
-    const start = new Date(); start.setDate(end.getDate() - 14);
-    const rows = await fetchDaily(ticker, start, end);
-    const latest = rows[rows.length - 1];
-    const prev = rows.length >= 2 ? rows[rows.length - 2] : null;
-    const change = prev ? latest.close - prev.close : 0;
-    const pct = prev && prev.close ? (change / prev.close) * 100 : 0;
-    return { ...latest, prevClose: prev ? prev.close : null, change, pct };
+    const lines = text.trim().split(/\r?\n/);
+    if (lines.length < 2) throw new Error("No CSV rows");
+    const out = [];
+    for (let i = 1; i < lines.length; i++) {
+      const p = lines[i].split(",");
+      if (p.length < 6) continue;
+      const close = safeNum(p[4]);
+      if (close === null) continue;
+      out.push({ date: p[0], close });
+    }
+    if (out.length === 0) throw new Error("No usable rows");
+    return out;
   }
 
   // Chart history: fetch only the requested period and cache by (ticker, period).
@@ -603,9 +616,8 @@
     else if (period === "3Y") start.setFullYear(start.getFullYear() - 3);
     else if (period === "5Y") start.setFullYear(start.getFullYear() - 5);
     else start.setMonth(start.getMonth() - 3);
-    start.setDate(start.getDate() - 7); // small buffer for weekends/holidays
-    const rows = await fetchDaily(ticker, start, end);
-    const out = rows.map(r => ({ date: r.date, close: r.close }));
+    start.setDate(start.getDate() - 7);
+    const out = await fetchDaily(ticker, start, end);
     historyCache.set(key, out);
     return out;
   }
@@ -803,19 +815,22 @@
           <td colspan="9" class="muted">— ${r.error} —</td>
         </tr>`;
       }
-      const changeClass = r.change >= 0 ? "up" : "down";
-      const sign = r.change >= 0 ? "+" : "";
+      const hasChange = r.change !== null && r.change !== undefined && !Number.isNaN(r.change);
+      const changeClass = hasChange ? (r.change >= 0 ? "up" : "down") : "muted";
+      const sign = hasChange && r.change >= 0 ? "+" : "";
+      const changeCell = hasChange ? `${sign}${fmtNum(r.change, 2)}` : "—";
+      const pctCell = hasChange ? `${sign}${fmtNum(r.pct, 2)}%` : "—";
       return `<tr data-ticker="${r.ticker}">
         <td class="ticker">${r.ticker}</td>
         <td class="name">${r.name} <span class="sector">${r.sector}</span></td>
         <td class="muted hide-sm">${r.date || "—"}</td>
         <td class="num">$${fmtNum(r.close, 2)}</td>
         <td class="num">HK$${fmtNum(r.closeHkd, 2)}</td>
-        <td class="num ${changeClass}">${sign}${fmtNum(r.change, 2)}</td>
-        <td class="num ${changeClass}">${sign}${fmtNum(r.pct, 2)}%</td>
-        <td class="num hide-sm">$${fmtNum(r.open, 2)}</td>
-        <td class="num hide-sm">$${fmtNum(r.high, 2)}</td>
-        <td class="num hide-sm">$${fmtNum(r.low, 2)}</td>
+        <td class="num ${changeClass}">${changeCell}</td>
+        <td class="num ${changeClass}">${pctCell}</td>
+        <td class="num hide-sm">${r.open !== null ? "$" + fmtNum(r.open, 2) : "—"}</td>
+        <td class="num hide-sm">${r.high !== null ? "$" + fmtNum(r.high, 2) : "—"}</td>
+        <td class="num hide-sm">${r.low !== null ? "$" + fmtNum(r.low, 2) : "—"}</td>
         <td class="num hide-sm">${fmtInt(r.volume)}</td>
       </tr>`;
     }).join("");
@@ -838,7 +853,7 @@
 
     const results = await Promise.all(TICKERS.map(async (t) => {
       try {
-        const q = await fetchRecent(t.ticker);
+        const q = await fetchQuote(t.ticker);
         return {
           ...t,
           date: q.date,
