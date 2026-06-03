@@ -237,6 +237,85 @@
   .legend .usd { background: var(--accent-2); }
   .legend .hkd { background: var(--accent); }
 
+  /* News section */
+  .news-section {
+    margin-top: 28px;
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 20px;
+  }
+  .news-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: end;
+    gap: 12px;
+    flex-wrap: wrap;
+    margin-bottom: 16px;
+  }
+  .news-head h2 { margin: 0; font-size: 1.2rem; }
+  .news-sub { margin: 4px 0 0; color: var(--muted); font-size: 0.88rem; }
+  .news-controls { display: flex; gap: 8px; flex-wrap: wrap; }
+  .news-filter {
+    background: var(--card-2);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 8px 10px;
+    font-size: 0.9rem;
+  }
+  .news-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+    gap: 12px;
+  }
+  .news-item {
+    background: var(--card-2);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 14px;
+    display: flex;
+    flex-direction: column;
+    transition: border-color 0.15s ease, transform 0.06s ease;
+  }
+  .news-item:hover { border-color: var(--accent-2); }
+  .news-item .src {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 0.72rem;
+    text-transform: uppercase;
+    letter-spacing: 0.6px;
+    color: var(--muted);
+    margin-bottom: 8px;
+  }
+  .news-item .src .badge {
+    background: #232b58;
+    color: var(--accent-2);
+    padding: 2px 8px;
+    border-radius: 999px;
+    font-weight: 600;
+  }
+  .news-item .title {
+    font-size: 0.98rem;
+    font-weight: 600;
+    line-height: 1.35;
+    color: var(--text);
+    text-decoration: none;
+    margin-bottom: 8px;
+  }
+  .news-item .title:hover { color: var(--accent-2); }
+  .news-item .desc {
+    font-size: 0.85rem;
+    color: var(--muted);
+    line-height: 1.5;
+    margin: 0;
+    display: -webkit-box;
+    -webkit-line-clamp: 3;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+
   @media (max-width: 720px) {
     thead th, tbody td { padding: 10px 8px; font-size: 0.85rem; }
     .ticker { font-size: 0.9rem; }
@@ -286,9 +365,31 @@
       </table>
     </div>
 
+    <section class="news-section">
+      <div class="news-head">
+        <div>
+          <h2>Daily Investment News</h2>
+          <p class="news-sub">Latest US market headlines from major financial sources.</p>
+        </div>
+        <div class="news-controls">
+          <select id="newsFilter" class="news-filter" aria-label="Filter news source">
+            <option value="all">All sources</option>
+            <option value="yahoo">Yahoo Finance</option>
+            <option value="marketwatch">MarketWatch</option>
+            <option value="cnbc">CNBC</option>
+          </select>
+          <button id="newsRefreshBtn" class="btn-ghost">Refresh news</button>
+        </div>
+      </div>
+      <div class="news-grid" id="newsGrid">
+        <div class="loading"><span class="spinner"></span>Loading latest headlines&hellip;</div>
+      </div>
+    </section>
+
     <footer>
       Price data: <a href="https://stooq.com" target="_blank" rel="noopener">stooq.com</a> (delayed, end-of-day).
       FX rate: <a href="https://open.er-api.com" target="_blank" rel="noopener">open.er-api.com</a>.
+      News: aggregated via <a href="https://rss2json.com" target="_blank" rel="noopener">rss2json</a> from Yahoo Finance, MarketWatch &amp; CNBC.
       For informational use only — not investment advice.
     </footer>
   </div>
@@ -716,7 +817,92 @@
     sortKey = "pct"; sortDir = -1; render();
   });
 
+  // ---------- News ----------
+  const NEWS_FEEDS = [
+    { id: "yahoo",       label: "Yahoo Finance", url: "https://finance.yahoo.com/news/rssindex" },
+    { id: "marketwatch", label: "MarketWatch",   url: "https://feeds.content.dowjones.io/public/rss/mw_topstories" },
+    { id: "cnbc",        label: "CNBC Markets",  url: "https://www.cnbc.com/id/15839069/device/rss/rss.html" },
+  ];
+
+  const newsGrid = document.getElementById("newsGrid");
+  const newsFilter = document.getElementById("newsFilter");
+  const newsRefreshBtn = document.getElementById("newsRefreshBtn");
+  let allNews = [];
+
+  function stripHtml(s) {
+    if (!s) return "";
+    const tmp = document.createElement("div");
+    tmp.innerHTML = s;
+    return (tmp.textContent || tmp.innerText || "").trim();
+  }
+
+  function timeAgo(iso) {
+    if (!iso) return "";
+    const t = new Date(iso).getTime();
+    if (Number.isNaN(t)) return "";
+    const diff = Math.max(0, Date.now() - t) / 1000;
+    if (diff < 60) return Math.floor(diff) + "s ago";
+    if (diff < 3600) return Math.floor(diff / 60) + "m ago";
+    if (diff < 86400) return Math.floor(diff / 3600) + "h ago";
+    return Math.floor(diff / 86400) + "d ago";
+  }
+
+  async function fetchFeed(feed) {
+    const api = "https://api.rss2json.com/v1/api.json?count=15&rss_url=" + encodeURIComponent(feed.url);
+    const res = await fetch(api);
+    if (!res.ok) throw new Error(feed.label + " HTTP " + res.status);
+    const data = await res.json();
+    if (data.status !== "ok" || !Array.isArray(data.items)) throw new Error(feed.label + " bad payload");
+    return data.items.map(it => ({
+      source: feed.id,
+      sourceLabel: feed.label,
+      title: stripHtml(it.title),
+      link: it.link,
+      desc: stripHtml(it.description).slice(0, 240),
+      date: it.pubDate ? new Date(it.pubDate).toISOString() : null,
+    }));
+  }
+
+  function renderNews() {
+    const filter = newsFilter.value;
+    const list = filter === "all" ? allNews : allNews.filter(n => n.source === filter);
+    if (list.length === 0) {
+      newsGrid.innerHTML = `<div class="empty">No headlines available right now.</div>`;
+      return;
+    }
+    newsGrid.innerHTML = list.slice(0, 30).map(n => `
+      <article class="news-item">
+        <div class="src">
+          <span class="badge">${n.sourceLabel}</span>
+          <span>${timeAgo(n.date)}</span>
+        </div>
+        <a class="title" href="${n.link}" target="_blank" rel="noopener">${n.title}</a>
+        ${n.desc ? `<p class="desc">${n.desc}</p>` : ""}
+      </article>
+    `).join("");
+  }
+
+  async function loadNews() {
+    newsRefreshBtn.disabled = true;
+    newsGrid.innerHTML = `<div class="loading"><span class="spinner"></span>Loading latest headlines&hellip;</div>`;
+    const settled = await Promise.allSettled(NEWS_FEEDS.map(fetchFeed));
+    const items = [];
+    settled.forEach(r => { if (r.status === "fulfilled") items.push(...r.value); });
+    items.sort((a, b) => (b.date || "").localeCompare(a.date || ""));
+    allNews = items;
+    if (allNews.length === 0) {
+      newsGrid.innerHTML = `<div class="error">Failed to load news. Try refreshing in a moment.</div>`;
+    } else {
+      renderNews();
+    }
+    newsRefreshBtn.disabled = false;
+  }
+
+  newsFilter.addEventListener("change", renderNews);
+  newsRefreshBtn.addEventListener("click", loadNews);
+
   loadAll();
+  loadNews();
 </script>
 </body>
 </html>
