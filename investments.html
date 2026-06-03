@@ -104,6 +104,7 @@
     border-bottom: 1px solid #1f2647;
     white-space: nowrap;
   }
+  tbody tr { cursor: pointer; transition: background 0.1s ease; }
   tbody tr:hover { background: #1a2148; }
   tbody tr:last-child td { border-bottom: none; }
   .ticker { font-weight: 700; color: var(--accent); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
@@ -147,10 +148,100 @@
   }
   footer a { color: var(--accent-2); text-decoration: none; }
   footer a:hover { text-decoration: underline; }
+
+  /* Modal */
+  .modal-backdrop {
+    position: fixed; inset: 0;
+    background: rgba(5, 8, 22, 0.78);
+    backdrop-filter: blur(4px);
+    display: none;
+    align-items: center;
+    justify-content: center;
+    padding: 20px;
+    z-index: 50;
+  }
+  .modal-backdrop.open { display: flex; }
+  .modal {
+    width: 100%;
+    max-width: 920px;
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    padding: 22px;
+    max-height: 92vh;
+    overflow: auto;
+  }
+  .modal-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: start;
+    gap: 16px;
+    margin-bottom: 14px;
+  }
+  .modal-head h2 { margin: 0; font-size: 1.3rem; }
+  .modal-head .sub { color: var(--muted); font-size: 0.9rem; margin-top: 4px; }
+  .close-btn {
+    background: transparent;
+    color: var(--muted);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 6px 12px;
+    cursor: pointer;
+    font-size: 1rem;
+  }
+  .close-btn:hover { color: var(--text); border-color: var(--muted); }
+  .period-tabs { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 14px; }
+  .period-tabs button {
+    background: transparent;
+    color: var(--muted);
+    border: 1px solid var(--border);
+    padding: 6px 14px;
+    border-radius: 999px;
+    font-size: 0.88rem;
+  }
+  .period-tabs button.active {
+    background: linear-gradient(135deg, var(--accent-2), #818cf8);
+    color: #0b1020;
+    border-color: transparent;
+  }
+  .chart-wrap {
+    background: var(--card-2);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 14px;
+    margin-bottom: 14px;
+  }
+  .chart-stats {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+    gap: 12px;
+    margin-bottom: 14px;
+  }
+  .chart-stat {
+    background: var(--card-2);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 10px 12px;
+  }
+  .chart-stat .lbl { font-size: 0.72rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.6px; }
+  .chart-stat .val { font-size: 1.05rem; font-weight: 700; margin-top: 4px; font-variant-numeric: tabular-nums; }
+  svg.chart { width: 100%; height: 320px; display: block; }
+  svg.chart .axis { stroke: #2a3158; stroke-width: 1; }
+  svg.chart .grid { stroke: #1f2647; stroke-width: 1; stroke-dasharray: 3 3; }
+  svg.chart .lbl { fill: var(--muted); font-size: 11px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+  svg.chart .line-usd { fill: none; stroke: var(--accent-2); stroke-width: 2; }
+  svg.chart .line-hkd { fill: none; stroke: var(--accent); stroke-width: 2; stroke-dasharray: 4 3; }
+  svg.chart .area { fill: url(#areaGrad); opacity: 0.25; }
+  .legend { display: flex; gap: 16px; font-size: 0.82rem; color: var(--muted); margin-top: 6px; }
+  .legend .swatch { display: inline-block; width: 14px; height: 3px; vertical-align: middle; margin-right: 6px; border-radius: 2px; }
+  .legend .usd { background: var(--accent-2); }
+  .legend .hkd { background: var(--accent); }
+
   @media (max-width: 720px) {
     thead th, tbody td { padding: 10px 8px; font-size: 0.85rem; }
     .ticker { font-size: 0.9rem; }
     .hide-sm { display: none; }
+    svg.chart { height: 240px; }
   }
 </style>
 </head>
@@ -159,7 +250,7 @@
     <header>
       <div>
         <h1>AI &amp; Semiconductor Investment Monitor</h1>
-        <p>Daily US stock prices for major AI and chip companies — shown in USD and HKD.</p>
+        <p>Daily US stock prices for major AI and chip companies — shown in USD and HKD. Click a row for chart history.</p>
       </div>
       <div class="meta" id="meta">
         <span><span class="spinner"></span>Loading market data&hellip;</span>
@@ -167,7 +258,7 @@
     </header>
 
     <div class="controls">
-      <input id="search" class="search" type="search" placeholder="Filter by ticker or name (e.g. NVDA, broadcom)" />
+      <input id="search" class="search" type="search" placeholder="Filter by ticker or name (e.g. NVDA, Broadcom)" />
       <button id="refreshBtn">Refresh</button>
       <button id="sortByChange" class="btn-ghost">Sort by % change</button>
     </div>
@@ -202,32 +293,61 @@
     </footer>
   </div>
 
+  <!-- Modal -->
+  <div class="modal-backdrop" id="modal" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
+    <div class="modal">
+      <div class="modal-head">
+        <div>
+          <h2 id="modalTitle">—</h2>
+          <div class="sub" id="modalSub">—</div>
+        </div>
+        <button class="close-btn" id="modalClose" aria-label="Close">✕</button>
+      </div>
+      <div class="period-tabs" id="periodTabs">
+        <button data-period="3M" class="active">3 Months</button>
+        <button data-period="1Y">1 Year</button>
+        <button data-period="3Y">3 Years</button>
+        <button data-period="5Y">5 Years</button>
+      </div>
+      <div class="chart-stats" id="chartStats"></div>
+      <div class="chart-wrap">
+        <div id="chartContainer">
+          <div class="loading"><span class="spinner"></span>Loading chart&hellip;</div>
+        </div>
+        <div class="legend">
+          <span><span class="swatch usd"></span>Close (USD)</span>
+          <span><span class="swatch hkd"></span>Close (HKD)</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
 <script>
   const TICKERS = [
     // Semiconductors
-    { ticker: "NVDA",  name: "NVIDIA",                       sector: "Semi" },
-    { ticker: "AMD",   name: "Advanced Micro Devices",       sector: "Semi" },
-    { ticker: "AVGO",  name: "Broadcom",                     sector: "Semi" },
-    { ticker: "TSM",   name: "Taiwan Semiconductor (TSMC)",  sector: "Semi" },
-    { ticker: "INTC",  name: "Intel",                        sector: "Semi" },
-    { ticker: "MU",    name: "Micron Technology",            sector: "Semi" },
-    { ticker: "QCOM",  name: "Qualcomm",                     sector: "Semi" },
-    { ticker: "ASML",  name: "ASML Holding",                 sector: "Semi" },
-    { ticker: "MRVL",  name: "Marvell Technology",           sector: "Semi" },
-    { ticker: "ARM",   name: "Arm Holdings",                 sector: "Semi" },
-    { ticker: "SMCI",  name: "Super Micro Computer",         sector: "Semi" },
-    { ticker: "AMAT",  name: "Applied Materials",            sector: "Semi" },
-    { ticker: "LRCX",  name: "Lam Research",                 sector: "Semi" },
-    { ticker: "KLAC",  name: "KLA Corporation",              sector: "Semi" },
+    { ticker: "NVDA",  name: "NVIDIA Corporation",                              sector: "Semi" },
+    { ticker: "AMD",   name: "Advanced Micro Devices, Inc.",                    sector: "Semi" },
+    { ticker: "AVGO",  name: "Broadcom Inc.",                                   sector: "Semi" },
+    { ticker: "TSM",   name: "Taiwan Semiconductor Manufacturing Company Ltd.", sector: "Semi" },
+    { ticker: "INTC",  name: "Intel Corporation",                               sector: "Semi" },
+    { ticker: "MU",    name: "Micron Technology, Inc.",                         sector: "Semi" },
+    { ticker: "QCOM",  name: "QUALCOMM Incorporated",                           sector: "Semi" },
+    { ticker: "ASML",  name: "ASML Holding N.V.",                               sector: "Semi" },
+    { ticker: "MRVL",  name: "Marvell Technology, Inc.",                        sector: "Semi" },
+    { ticker: "ARM",   name: "Arm Holdings plc",                                sector: "Semi" },
+    { ticker: "SMCI",  name: "Super Micro Computer, Inc.",                      sector: "Semi" },
+    { ticker: "AMAT",  name: "Applied Materials, Inc.",                         sector: "Semi" },
+    { ticker: "LRCX",  name: "Lam Research Corporation",                        sector: "Semi" },
+    { ticker: "KLAC",  name: "KLA Corporation",                                 sector: "Semi" },
     // AI / Hyperscalers
-    { ticker: "MSFT",  name: "Microsoft",                    sector: "AI"   },
-    { ticker: "GOOGL", name: "Alphabet (Google)",            sector: "AI"   },
-    { ticker: "META",  name: "Meta Platforms",               sector: "AI"   },
-    { ticker: "AMZN",  name: "Amazon",                       sector: "AI"   },
-    { ticker: "ORCL",  name: "Oracle",                       sector: "AI"   },
-    { ticker: "PLTR",  name: "Palantir",                     sector: "AI"   },
-    { ticker: "CRM",   name: "Salesforce",                   sector: "AI"   },
-    { ticker: "IBM",   name: "IBM",                          sector: "AI"   },
+    { ticker: "MSFT",  name: "Microsoft Corporation",                           sector: "AI"   },
+    { ticker: "GOOGL", name: "Alphabet Inc. (Google)",                          sector: "AI"   },
+    { ticker: "META",  name: "Meta Platforms, Inc.",                            sector: "AI"   },
+    { ticker: "AMZN",  name: "Amazon.com, Inc.",                                sector: "AI"   },
+    { ticker: "ORCL",  name: "Oracle Corporation",                              sector: "AI"   },
+    { ticker: "PLTR",  name: "Palantir Technologies Inc.",                      sector: "AI"   },
+    { ticker: "CRM",   name: "Salesforce, Inc.",                                sector: "AI"   },
+    { ticker: "IBM",   name: "International Business Machines Corporation",     sector: "AI"   },
   ];
 
   const rowsEl = document.getElementById("rows");
@@ -236,11 +356,21 @@
   const refreshBtn = document.getElementById("refreshBtn");
   const sortByChangeBtn = document.getElementById("sortByChange");
   const headers = document.querySelectorAll("thead th");
+  const modal = document.getElementById("modal");
+  const modalTitle = document.getElementById("modalTitle");
+  const modalSub = document.getElementById("modalSub");
+  const modalClose = document.getElementById("modalClose");
+  const periodTabs = document.getElementById("periodTabs");
+  const chartContainer = document.getElementById("chartContainer");
+  const chartStats = document.getElementById("chartStats");
 
   let allRows = [];
   let usdToHkd = null;
   let sortKey = "ticker";
-  let sortDir = 1; // 1 = asc, -1 = desc
+  let sortDir = 1;
+  let activeTicker = null;
+  let activePeriod = "3M";
+  const historyCache = new Map(); // key: ticker -> full daily history
 
   function fmtNum(n, digits) {
     if (n === null || n === undefined || Number.isNaN(n)) return "—";
@@ -250,9 +380,10 @@
     if (n === null || n === undefined || Number.isNaN(n)) return "—";
     return Number(n).toLocaleString("en-US");
   }
+  function pad(n) { return String(n).padStart(2, "0"); }
+  function ymd(d) { return `${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}`; }
 
   async function fetchFxUsdHkd() {
-    // open.er-api.com is free, CORS-enabled, no key required.
     try {
       const res = await fetch("https://open.er-api.com/v6/latest/USD");
       if (!res.ok) throw new Error("FX HTTP " + res.status);
@@ -267,8 +398,6 @@
   }
 
   async function fetchStooq(ticker) {
-    // Stooq supports CORS and returns CSV.
-    // Format: Symbol,Date,Time,Open,High,Low,Close,Volume
     const sym = ticker.toLowerCase() + ".us";
     const url = `https://stooq.com/q/l/?s=${sym}&f=sd2t2ohlcv&h&e=csv`;
     const res = await fetch(url);
@@ -282,8 +411,7 @@
     if (close === "N/D" || !close) throw new Error("No data");
     return {
       symbol: symbol.toUpperCase(),
-      date,
-      time,
+      date, time,
       open: parseFloat(open),
       high: parseFloat(high),
       low: parseFloat(low),
@@ -291,6 +419,175 @@
       volume: parseInt(volume, 10),
     };
   }
+
+  async function fetchHistory(ticker) {
+    if (historyCache.has(ticker)) return historyCache.get(ticker);
+    const sym = ticker.toLowerCase() + ".us";
+    const today = new Date();
+    const start = new Date(); start.setFullYear(today.getFullYear() - 5);
+    start.setDate(start.getDate() - 14); // small buffer
+    const url = `https://stooq.com/q/d/l/?s=${sym}&i=d&d1=${ymd(start)}&d2=${ymd(today)}`;
+    const res = await fetch(url);
+    if (!res.ok) throw new Error("History HTTP " + res.status);
+    const text = (await res.text()).trim();
+    const lines = text.split(/\r?\n/);
+    if (lines.length < 2) throw new Error("No history rows");
+    // header: Date,Open,High,Low,Close,Volume
+    const out = [];
+    for (let i = 1; i < lines.length; i++) {
+      const parts = lines[i].split(",");
+      if (parts.length < 6) continue;
+      const close = parseFloat(parts[4]);
+      if (Number.isNaN(close)) continue;
+      out.push({ date: parts[0], close });
+    }
+    if (out.length === 0) throw new Error("History empty");
+    historyCache.set(ticker, out);
+    return out;
+  }
+
+  function filterByPeriod(history, period) {
+    if (!history.length) return [];
+    const end = new Date(history[history.length - 1].date);
+    const start = new Date(end);
+    if (period === "3M") start.setMonth(start.getMonth() - 3);
+    else if (period === "1Y") start.setFullYear(start.getFullYear() - 1);
+    else if (period === "3Y") start.setFullYear(start.getFullYear() - 3);
+    else if (period === "5Y") start.setFullYear(start.getFullYear() - 5);
+    const startStr = start.toISOString().slice(0, 10);
+    return history.filter(p => p.date >= startStr);
+  }
+
+  function renderChart(series, fx) {
+    if (!series.length) {
+      chartContainer.innerHTML = `<div class="empty">No data for this period.</div>`;
+      chartStats.innerHTML = "";
+      return;
+    }
+
+    const W = 880, H = 320, padL = 56, padR = 56, padT = 16, padB = 28;
+    const closes = series.map(p => p.close);
+    const minP = Math.min(...closes);
+    const maxP = Math.max(...closes);
+    const rng = Math.max(maxP - minP, 0.0001);
+    const lo = minP - rng * 0.08;
+    const hi = maxP + rng * 0.08;
+    const xStep = (W - padL - padR) / Math.max(series.length - 1, 1);
+    const yScale = v => padT + (H - padT - padB) * (1 - (v - lo) / (hi - lo));
+
+    const pts = series.map((p, i) => [padL + i * xStep, yScale(p.close)]);
+    const path = pts.map((q, i) => (i === 0 ? "M" : "L") + q[0].toFixed(2) + "," + q[1].toFixed(2)).join(" ");
+    const area = path + ` L ${pts[pts.length - 1][0].toFixed(2)},${(H - padB).toFixed(2)} L ${pts[0][0].toFixed(2)},${(H - padB).toFixed(2)} Z`;
+
+    // Right axis (HKD)
+    const loH = lo * fx, hiH = hi * fx;
+
+    // Y axis ticks (USD)
+    const tickCount = 5;
+    const yTicks = [];
+    for (let i = 0; i <= tickCount; i++) {
+      const v = lo + (hi - lo) * (i / tickCount);
+      const y = yScale(v);
+      yTicks.push({ v, y, vH: v * fx });
+    }
+
+    // X axis labels
+    const xTickCount = Math.min(6, series.length);
+    const xTicks = [];
+    for (let i = 0; i < xTickCount; i++) {
+      const idx = Math.round((series.length - 1) * (i / Math.max(xTickCount - 1, 1)));
+      const x = padL + idx * xStep;
+      xTicks.push({ x, label: series[idx].date });
+    }
+
+    const change = series[series.length - 1].close - series[0].close;
+    const pct = (change / series[0].close) * 100;
+    const up = change >= 0;
+    const accent = up ? "var(--up)" : "var(--down)";
+
+    const svg = `
+      <svg class="chart" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" xmlns="http://www.w3.org/2000/svg">
+        <defs>
+          <linearGradient id="areaGrad" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stop-color="${up ? '#4ade80' : '#f87171'}" stop-opacity="0.5"/>
+            <stop offset="100%" stop-color="${up ? '#4ade80' : '#f87171'}" stop-opacity="0"/>
+          </linearGradient>
+        </defs>
+        ${yTicks.map(t => `
+          <line class="grid" x1="${padL}" x2="${W - padR}" y1="${t.y.toFixed(2)}" y2="${t.y.toFixed(2)}"/>
+          <text class="lbl" x="${padL - 6}" y="${(t.y + 4).toFixed(2)}" text-anchor="end">$${fmtNum(t.v, t.v < 10 ? 2 : 0)}</text>
+          <text class="lbl" x="${W - padR + 6}" y="${(t.y + 4).toFixed(2)}" text-anchor="start">HK$${fmtNum(t.vH, t.vH < 10 ? 2 : 0)}</text>
+        `).join("")}
+        <line class="axis" x1="${padL}" x2="${W - padR}" y1="${H - padB}" y2="${H - padB}"/>
+        <path class="area" d="${area}" style="fill: ${up ? '#4ade80' : '#f87171'}; opacity: 0.12;"/>
+        <path class="line-usd" d="${path}" style="stroke: ${accent};"/>
+        ${xTicks.map(t => `
+          <text class="lbl" x="${t.x.toFixed(2)}" y="${H - padB + 16}" text-anchor="middle">${t.label}</text>
+        `).join("")}
+      </svg>
+    `;
+
+    chartContainer.innerHTML = svg;
+
+    const startP = series[0].close;
+    const endP = series[series.length - 1].close;
+    const sign = change >= 0 ? "+" : "";
+    const stats = [
+      { lbl: "Start", val: `$${fmtNum(startP, 2)}`, cls: "" },
+      { lbl: "End",   val: `$${fmtNum(endP, 2)}`,   cls: "" },
+      { lbl: "Change", val: `${sign}$${fmtNum(change, 2)}`, cls: up ? "up" : "down" },
+      { lbl: "% Change", val: `${sign}${fmtNum(pct, 2)}%`, cls: up ? "up" : "down" },
+      { lbl: "Period High", val: `$${fmtNum(maxP, 2)}`, cls: "" },
+      { lbl: "Period Low", val: `$${fmtNum(minP, 2)}`, cls: "" },
+    ];
+    chartStats.innerHTML = stats.map(s =>
+      `<div class="chart-stat"><div class="lbl">${s.lbl}</div><div class="val ${s.cls}">${s.val}</div></div>`
+    ).join("");
+  }
+
+  async function openChart(row) {
+    activeTicker = row.ticker;
+    activePeriod = "3M";
+    modal.classList.add("open");
+    modalTitle.textContent = `${row.name} (${row.ticker})`;
+    modalSub.textContent = `${row.sector === "Semi" ? "Semiconductor" : "AI / Software"} • Price history (closing prices)`;
+    periodTabs.querySelectorAll("button").forEach(b => {
+      b.classList.toggle("active", b.dataset.period === activePeriod);
+    });
+    chartContainer.innerHTML = `<div class="loading"><span class="spinner"></span>Loading chart&hellip;</div>`;
+    chartStats.innerHTML = "";
+
+    try {
+      const hist = await fetchHistory(row.ticker);
+      drawForActive(hist);
+    } catch (e) {
+      chartContainer.innerHTML = `<div class="error">Failed to load historical data: ${e.message}</div>`;
+    }
+  }
+
+  function drawForActive(history) {
+    const series = filterByPeriod(history, activePeriod);
+    renderChart(series, usdToHkd || 7.80);
+  }
+
+  periodTabs.addEventListener("click", (e) => {
+    const btn = e.target.closest("button");
+    if (!btn) return;
+    activePeriod = btn.dataset.period;
+    periodTabs.querySelectorAll("button").forEach(b => {
+      b.classList.toggle("active", b === btn);
+    });
+    const hist = historyCache.get(activeTicker);
+    if (hist) drawForActive(hist);
+  });
+
+  function closeModal() {
+    modal.classList.remove("open");
+    activeTicker = null;
+  }
+  modalClose.addEventListener("click", closeModal);
+  modal.addEventListener("click", (e) => { if (e.target === modal) closeModal(); });
+  document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeModal(); });
 
   function renderMeta() {
     const lastUpdated = new Date().toLocaleString("en-US", { hour12: false });
@@ -338,7 +635,7 @@
 
     rowsEl.innerHTML = filtered.map(r => {
       if (r.error) {
-        return `<tr>
+        return `<tr data-ticker="${r.ticker}">
           <td class="ticker">${r.ticker}</td>
           <td class="name">${r.name} <span class="sector">${r.sector}</span></td>
           <td colspan="9" class="muted">— ${r.error} —</td>
@@ -346,7 +643,7 @@
       }
       const changeClass = r.change >= 0 ? "up" : "down";
       const sign = r.change >= 0 ? "+" : "";
-      return `<tr>
+      return `<tr data-ticker="${r.ticker}">
         <td class="ticker">${r.ticker}</td>
         <td class="name">${r.name} <span class="sector">${r.sector}</span></td>
         <td class="muted hide-sm">${r.date || "—"}</td>
@@ -361,6 +658,13 @@
       </tr>`;
     }).join("");
   }
+
+  rowsEl.addEventListener("click", (e) => {
+    const tr = e.target.closest("tr");
+    if (!tr || !tr.dataset.ticker) return;
+    const row = allRows.find(r => r.ticker === tr.dataset.ticker);
+    if (row) openChart(row);
+  });
 
   async function loadAll() {
     refreshBtn.disabled = true;
@@ -384,8 +688,7 @@
           close: q.close,
           closeHkd: q.close * usdToHkd,
           volume: q.volume,
-          change,
-          pct,
+          change, pct,
         };
       } catch (e) {
         return { ...t, error: "Data unavailable" };
