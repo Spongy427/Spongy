@@ -484,30 +484,55 @@
   function pad(n) { return String(n).padStart(2, "0"); }
   function ymd(d) { return `${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}`; }
 
-  // CORS proxies — Stooq doesn't always send permissive CORS headers,
-  // so we route through a public proxy (with fallbacks) when fetching from it.
-  const CORS_PROXIES = [
-    (u) => "https://corsproxy.io/?url=" + encodeURIComponent(u),
-    (u) => "https://api.allorigins.win/raw?url=" + encodeURIComponent(u),
-    (u) => "https://api.codetabs.com/v1/proxy?quest=" + encodeURIComponent(u),
+  // Stooq doesn't reliably send CORS headers, so requests are routed through
+  // public CORS proxies. allorigins.win's /get endpoint (which returns JSON
+  // with the body in `.contents`) tends to be the most reliable free option.
+  const PROXY_STRATEGIES = [
+    {
+      name: "allorigins-get",
+      build: (u) => "https://api.allorigins.win/get?url=" + encodeURIComponent(u) + "&_=" + Date.now(),
+      extract: async (res) => {
+        const data = await res.json();
+        if (!data || typeof data.contents !== "string") throw new Error("allorigins missing contents");
+        return data.contents;
+      },
+    },
+    {
+      name: "allorigins-raw",
+      build: (u) => "https://api.allorigins.win/raw?url=" + encodeURIComponent(u),
+      extract: (res) => res.text(),
+    },
+    {
+      name: "corsproxy.io",
+      build: (u) => "https://corsproxy.io/?" + encodeURIComponent(u),
+      extract: (res) => res.text(),
+    },
+    {
+      name: "thingproxy",
+      build: (u) => "https://thingproxy.freeboard.io/fetch/" + u,
+      extract: (res) => res.text(),
+    },
+    {
+      name: "codetabs",
+      build: (u) => "https://api.codetabs.com/v1/proxy?quest=" + encodeURIComponent(u),
+      extract: (res) => res.text(),
+    },
   ];
 
   async function fetchWithProxy(targetUrl) {
-    let lastErr = null;
-    // Try direct first (cheapest if it works), then each proxy.
-    const attempts = [targetUrl, ...CORS_PROXIES.map(p => p(targetUrl))];
-    for (const url of attempts) {
+    const errors = [];
+    for (const strat of PROXY_STRATEGIES) {
       try {
-        const res = await fetch(url);
-        if (!res.ok) { lastErr = new Error("HTTP " + res.status); continue; }
-        const text = await res.text();
-        if (text && text.length > 0) return text;
-        lastErr = new Error("Empty response");
+        const res = await fetch(strat.build(targetUrl));
+        if (!res.ok) { errors.push(`${strat.name}:HTTP${res.status}`); continue; }
+        const text = await strat.extract(res);
+        if (text && text.length > 0 && !/^\s*$/.test(text)) return text;
+        errors.push(`${strat.name}:empty`);
       } catch (e) {
-        lastErr = e;
+        errors.push(`${strat.name}:${e.message || "err"}`);
       }
     }
-    throw lastErr || new Error("All fetch attempts failed");
+    throw new Error("All proxies failed — " + errors.join(" | "));
   }
 
   async function fetchFxUsdHkd() {
@@ -813,7 +838,8 @@
           change, pct,
         };
       } catch (e) {
-        return { ...t, error: "Data unavailable" };
+        console.warn(`[${t.ticker}] fetch failed:`, e);
+        return { ...t, error: (e && e.message) ? e.message.slice(0, 80) : "Data unavailable" };
       }
     }));
 
